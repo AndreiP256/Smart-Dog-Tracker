@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jack Track — Smart Dog Tracker</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <style>
+    :root {
+      --bg:           #0c0e0d;
+      --surface:      #141614;
+      --surface2:     #1c1e1b;
+      --border:       #272a26;
+      --amber:        #d99a2e;
+      --amber-dim:    #7a5615;
+      --teal:         #3fa876;
+      --red:          #c94040;
+      --text:         #dedad2;
+      --muted:        #767870;
+      --mono:         'Courier New', Courier, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 18px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-dot {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--amber);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; flex-shrink: 0;
+    }
+    .brand-name {
+      font-size: 17px; font-weight: bold;
+      letter-spacing: 5px; color: var(--amber);
+    }
+    .brand-sub { font-size: 9px; color: var(--muted); letter-spacing: 2px; margin-top: 1px; }
+
+    .header-right { display: flex; align-items: center; gap: 18px; }
+    .pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 20px; font-size: 10px; letter-spacing: 1px;
+    }
+    .pill .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--red); transition: background .3s;
+    }
+    .pill .dot.ok { background: var(--teal); }
+    .ts { font-size: 10px; color: var(--muted); }
+    .hbtn {
+      padding: 5px 12px; background: transparent;
+      border: 1px solid var(--border); color: var(--muted);
+      font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
+      cursor: pointer; border-radius: 2px; transition: .15s;
+    }
+    .hbtn:hover { border-color: var(--amber); color: var(--amber); }
+
+    /* ── Alert banner ── */
+    #alertBanner {
+      flex-shrink: 0;
+      display: none;
+      background: var(--red);
+      color: #fff;
+      text-align: center;
+      padding: 5px;
+      font-size: 10px; letter-spacing: 3px;
+      animation: blink 1.2s ease infinite;
+    }
+    #alertBanner.show { display: block; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+    /* ── Layout ── */
+    .main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 310px;
+      overflow: hidden;
+    }
+
+    /* ── Map ── */
+    #map-wrap { position: relative; overflow: hidden; }
+    #map { width: 100%; height: 100%; }
+    #mapHint {
+      display: none;
+      position: absolute; bottom: 28px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(12,14,13,.9);
+      border: 1px solid var(--amber); color: var(--amber);
+      padding: 5px 14px; font-size: 10px; letter-spacing: 1px;
+      pointer-events: none; z-index: 999; border-radius: 2px;
+    }
+
+    /* Leaflet popup overrides */
+    .leaflet-popup-content-wrapper {
+      background: var(--surface2) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 4px !important;
+      box-shadow: none !important;
+      font-family: var(--mono) !important;
+      font-size: 11px !important;
+    }
+    .leaflet-popup-tip { background: var(--surface2) !important; }
+
+    /* ── Side panel ── */
+    .panel {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      overflow-y: auto; overflow-x: hidden;
+    }
+    .sec {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sec-label {
+      font-size: 9px; letter-spacing: 2px; color: var(--muted);
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+
+    /* ── Activity ── */
+    .act-row { display: flex; align-items: center; gap: 12px; }
+    .act-icon {
+      width: 44px; height: 44px; border-radius: 4px;
+      border: 1.5px solid var(--amber);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+      transition: border-color .3s;
+    }
+    .act-name {
+      font-size: 20px; font-weight: bold;
+      letter-spacing: 2px; color: var(--amber);
+      transition: color .3s;
+    }
+    .act-desc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Battery ── */
+    .bat-row { display: flex; align-items: center; gap: 10px; }
+    .bat-track {
+      flex: 1; height: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 2px;
+      overflow: hidden;
+    }
+    .bat-fill {
+      height: 100%; background: var(--teal);
+      border-radius: 2px; transition: width .5s, background .3s;
+    }
+    .bat-fill.low { background: var(--red); }
+    .bat-pct { font-size: 12px; min-width: 36px; text-align: right; }
+
+    /* ── Coords ── */
+    .coord-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .coord-item label { display: block; font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-bottom: 2px; }
+    .coord-item span  { font-size: 12px; }
+
+    /* ── Geofence ── */
+    .geo-stack { display: flex; flex-direction: column; gap: 8px; }
+    .range-row { display: flex; align-items: center; gap: 10px; }
+    input[type=range] {
+      flex: 1; -webkit-appearance: none; appearance: none;
+      height: 3px; background: var(--border); outline: none; cursor: pointer;
+      border-radius: 2px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--amber); cursor: pointer;
+    }
+    .range-val { font-size: 11px; min-width: 52px; text-align: right; color: var(--amber); }
+
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sbtn {
+      flex: 1;
+      padding: 6px 10px; background: transparent;
+      border: 1px solid var(--border); color: var(--muted);
+      font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
+      cursor: pointer; border-radius: 2px; transition: .15s; white-space: nowrap;
+    }
+    .sbtn:hover  { border-color: var(--amber); color: var(--amber); }
+    .sbtn.active { border-color: var(--teal);  color: var(--teal); }
+
+    .geo-hint { font-size: 10px; color: var(--amber); display: none; margin-top: 2px; }
+    .geo-info { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Toggles ── */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .toggle-row:last-child { margin-bottom: 0; }
+    .toggle-lbl { font-size: 11px; letter-spacing: 1px; }
+    .toggle {
+      width: 40px; height: 20px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; cursor: pointer; position: relative;
+      transition: background .2s, border-color .2s;
+    }
+    .toggle.on { background: var(--red); border-color: var(--red); }
+    .toggle::after {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--muted);
+      top: 2px; left: 2px;
+      transition: transform .2s, background .2s;
+    }
+    .toggle.on::after { transform: translateX(20px); background: #fff; }
+
+    /* ── Bark log ── */
+    .bark-list {
+      display: flex; flex-direction: column; gap: 3px;
+      max-height: 130px; overflow-y: auto;
+    }
+    .bark-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 3px 0; border-bottom: 1px solid var(--border);
+    }
+    .bark-time { color: var(--muted); font-size: 10px; }
+    .bark-val  { color: var(--amber); font-size: 11px; }
+    .bark-bar  { height: 2px; background: var(--border); margin-top: 2px; border-radius: 1px; overflow: hidden; }
+    .bark-fill { height: 100%; background: var(--amber); border-radius: 1px; }
+    .empty-msg { color: var(--muted); font-size: 10px; font-style: italic; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-dot">🐾</div>
+    <div>
+      <div class="brand-name">JACK TRACK</div>
+      <div class="brand-sub">Smart Dog Tracker — Dashboard</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="pill">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusTxt">CONNECTING</span>
+    </div>
+    <div class="ts" id="lastUpdate">—</div>
+    <button class="hbtn" id="refreshBtn" onclick="refresh()">↻ REFRESH</button>
+  </div>
+</header>
+
+<div id="alertBanner">⚠&nbsp;&nbsp;ALERTĂ — CÂINELE A IEȘIT DIN ZONA SIGURĂ&nbsp;&nbsp;⚠</div>
+
+<div class="main">
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="mapHint">CLICK PE HARTĂ PENTRU A SETA CENTRUL GEOFENCE</div>
+  </div>
+
+  <div class="panel">
+
+    <div class="sec">
+      <div class="sec-label">Activitate</div>
+      <div class="act-row">
+        <div class="act-icon" id="actIcon">🐕</div>
+        <div>
+          <div class="act-name" id="actName">—</div>
+          <div class="act-desc" id="actDesc">se încarcă...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Baterie</div>
+      <div class="bat-row">
+        <div class="bat-track">
+          <div class="bat-fill" id="batFill" style="width:0%"></div>
+        </div>
+        <div class="bat-pct" id="batPct">—%</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Poziție GPS</div>
+      <div class="coord-grid">
+        <div class="coord-item">
+          <label>LAT</label>
+          <span id="cLat">—</span>
+        </div>
+        <div class="coord-item">
+          <label>LON</label>
+          <span id="cLon">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Geofence</div>
+      <div class="geo-stack">
+        <div class="range-row">
+          <input type="range" id="geoSlider" min="20" max="1000" step="10" value="100"
+            oninput="previewRadius(this.value)">
+          <span class="range-val" id="geoVal">100 m</span>
+        </div>
+        <div class="btn-row">
+          <button class="sbtn" id="setBtn" onclick="toggleSetMode()">📍 SET CENTRU</button>
+          <button class="sbtn" onclick="applyRadius()">✓ APLICĂ RAZA</button>
+        </div>
+        <div class="geo-hint" id="geoHint">Click pe hartă pentru a plasa centrul...</div>
+        <div class="geo-info" id="geoInfo">Centru: nesetat</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Comenzi</div>
+      <div class="toggle-row">
+        <span class="toggle-lbl">BUZZER</span>
+        <div class="toggle" id="buzTog" onclick="cmdToggle('buzzer','buzTog')"></div>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-lbl">ALERTĂ MANUALĂ</span>
+        <div class="toggle" id="altTog" onclick="cmdToggle('alert','altTog')"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Lătrături recente</div>
+      <div class="bark-list" id="barkList">
+        <div class="empty-msg">se încarcă...</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ── Config ───────────────────────────────────────────────────
+   Pune-ți credențialele Adafruit IO mai jos.
+   NU face commit cu cheia publică dacă repo-ul e public!
+   Înlocuiește cheia cu o variabilă de mediu sau un fișier config.js separat în producție.
+─────────────────────────────────────────────────────────────── */
+const AIO_USER = 'AndreiP25';
+const AIO_KEY  = 'aio_KSXE208u6TMca4Ua16a849sKSZNp';
+const BASE     = `https://io.adafruit.com/api/v2/${AIO_USER}/feeds`;
+const HDR      = { 'X-AIO-Key': AIO_KEY, 'Content-Type': 'application/json' };
+
+/* ── Adafruit helpers ─────────────────────────────────────── */
+async function aioGet(feed, path = '/data/last') {
+  try {
+    const r = await fetch(`${BASE}/${feed}${path}`, { headers: HDR });
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
+
+async function aioPost(feed, value, extra = {}) {
+  try {
+    const body = { value: String(value), ...extra };
+    const r = await fetch(`${BASE}/${feed}/data`, {
+      method: 'POST', headers: HDR, body: JSON.stringify(body)
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+/* ── Map setup ────────────────────────────────────────────── */
+const DEFAULT_CENTER = [44.4355, 26.0461];
+
+const map = L.map('map', { zoomControl: true }).setView(DEFAULT_CENTER, 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+  maxZoom: 19
+}).addTo(map);
+
+/* Dog marker */
+const dogIcon = L.divIcon({
+  html: `<div style="
+    width:34px;height:34px;border-radius:50%;
+    background:#d99a2e;border:3px solid #0c0e0d;
+    display:flex;align-items:center;justify-content:center;
+    font-size:17px;box-shadow:0 0 0 2px #d99a2e40">🐕</div>`,
+  iconSize: [34, 34], iconAnchor: [17, 17], className: ''
+});
+let dogMarker = L.marker(DEFAULT_CENTER, { icon: dogIcon }).addTo(map);
+dogMarker.bindPopup('<b style="color:#d99a2e">JACK</b><br>Ultima poziție confirmată');
+
+/* Geofence circle + center dot */
+let geoCenter = [...DEFAULT_CENTER];
+let geoRadius = 100;
+
+let geoCircle = L.circle(geoCenter, {
+  radius: geoRadius, color: '#d99a2e', weight: 1.5,
+  fillColor: '#d99a2e', fillOpacity: 0.07, dashArray: '4 4'
+}).addTo(map);
+
+const centerIcon = L.divIcon({
+  html: `<div style="width:8px;height:8px;border-radius:50%;background:#d99a2e;
+    border:2px solid #0c0e0d;margin-top:-4px;margin-left:-4px"></div>`,
+  iconSize: [8, 8], iconAnchor: [4, 4], className: ''
+});
+let centerMark = L.marker(geoCenter, { icon: centerIcon, zIndexOffset: -1 }).addTo(map);
+
+/* Set-geofence mode */
+let setMode = false;
+let pendMark = null;
+
+map.on('click', e => {
+  if (!setMode) return;
+  const { lat, lng } = e.latlng;
+  if (pendMark) map.removeLayer(pendMark);
+  const pi = L.divIcon({
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:#3fa876;
+      border:2px solid #0c0e0d;margin-top:-7px;margin-left:-7px;opacity:.9"></div>`,
+    iconSize: [14,14], iconAnchor: [7,7], className: ''
+  });
+  pendMark = L.marker([lat, lng], { icon: pi }).addTo(map);
+  pendMark.bindPopup(
+    `<span style="font-size:10px;color:#3fa876">Nou centru</span><br>` +
+    `${lat.toFixed(5)}, ${lng.toFixed(5)}<br><br>` +
+    `<button onclick="confirmCenter(${lat},${lng})"
+      style="width:100%;padding:4px 0;background:#3fa876;border:none;
+      color:#0c0e0d;cursor:pointer;font-size:10px;letter-spacing:1px;
+      font-family:monospace;border-radius:2px">CONFIRMĂ</button>`
+  ).openPopup();
+});
+
+window.confirmCenter = async (lat, lng) => {
+  document.getElementById('geoHint').textContent = 'Se trimite...';
+  const ok = await aioPost('geofence-lat', lat.toFixed(6))
+          && await aioPost('geofence-lon', lng.toFixed(6));
+  if (ok) {
+    geoCenter = [lat, lng];
+    geoCircle.setLatLng(geoCenter);
+    centerMark.setLatLng(geoCenter);
+    document.getElementById('geoInfo').textContent = `Centru: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    if (pendMark) { map.removeLayer(pendMark); pendMark = null; }
+    toggleSetMode(false);
+  } else {
+    document.getElementById('geoHint').textContent = 'Eroare — încearcă din nou';
+  }
+};
+
+function toggleSetMode(force) {
+  setMode = (force !== undefined) ? force : !setMode;
+  document.getElementById('setBtn').classList.toggle('active', setMode);
+  document.getElementById('geoHint').style.display = setMode ? 'block' : 'none';
+  document.getElementById('mapHint').style.display  = setMode ? 'block' : 'none';
+  map.getContainer().style.cursor = setMode ? 'crosshair' : '';
+  if (!setMode) {
+    document.getElementById('geoHint').style.display = 'none';
+    if (pendMark) { map.removeLayer(pendMark); pendMark = null; }
+  }
+}
+
+function previewRadius(val) {
+  geoRadius = parseInt(val);
+  document.getElementById('geoVal').textContent = val + ' m';
+  geoCircle.setRadius(geoRadius);
+}
+
+async function applyRadius() {
+  await aioPost('geofencing', geoRadius);
+  document.getElementById('geoVal').textContent = geoRadius + ' m ✓';
+  setTimeout(() => {
+    document.getElementById('geoVal').textContent = geoRadius + ' m';
+  }, 1500);
+}
+
+/* ── Activity ─────────────────────────────────────────────── */
+const ACT = {
+  RESTING: { icon: '😴', color: '#767870', desc: 'stă / se odihnește' },
+  WALKING: { icon: '🐾', color: '#3fa876', desc: 'se plimbă normal' },
+  RUNNING: { icon: '💨', color: '#d99a2e', desc: 'aleargă' },
+  VEHICLE: { icon: '🚗', color: '#c94040', desc: '⚠ posibil în vehicul!' }
+};
+
+function setActivity(name) {
+  const key = (name || '').toUpperCase();
+  const m   = ACT[key] || { icon: '❓', color: '#767870', desc: 'necunoscut' };
+  document.getElementById('actIcon').textContent   = m.icon;
+  document.getElementById('actIcon').style.borderColor = m.color;
+  document.getElementById('actName').textContent   = key || '—';
+  document.getElementById('actName').style.color   = m.color;
+  document.getElementById('actDesc').textContent   = m.desc;
+}
+
+/* ── Toggle commands ──────────────────────────────────────── */
+const tState = { buzzer: false, alert: false };
+
+async function cmdToggle(feed, elId) {
+  tState[feed] = !tState[feed];
+  applyToggleUI(elId, tState[feed]);
+  await aioPost(feed, tState[feed] ? 'ON' : 'OFF');
+}
+
+function applyToggleUI(elId, on) {
+  document.getElementById(elId).classList.toggle('on', on);
+}
+
+function syncToggle(feed, elId, value) {
+  const on = value === 'ON' || value === '1';
+  tState[feed] = on;
+  applyToggleUI(elId, on);
+}
+
+/* ── Bark history ─────────────────────────────────────────── */
+async function loadBarks() {
+  const data = await aioGet('barking', '/data?limit=8');
+  const el   = document.getElementById('barkList');
+  if (!data || !data.length) {
+    el.innerHTML = '<div class="empty-msg">Fără lătrături înregistrate.</div>';
+    return;
+  }
+  el.innerHTML = data.map(d => {
+    const val = parseInt(d.value) || 0;
+    const pct = Math.min(100, Math.round(val / 1024 * 100));
+    const t   = new Date(d.created_at).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+    return `<div class="bark-item">
+      <span class="bark-time">${t}</span>
+      <span class="bark-val">${val}</span>
+    </div>
+    <div class="bark-bar"><div class="bark-fill" style="width:${pct}%"></div></div>`;
+  }).join('');
+}
+
+/* ── Main refresh ─────────────────────────────────────────── */
+async function refresh() {
+  document.getElementById('refreshBtn').textContent = '...';
+  let ok = false;
+
+  /* Location */
+  const loc = await aioGet('location');
+  if (loc && loc.lat) {
+    const lat = parseFloat(loc.lat), lng = parseFloat(loc.lon);
+    dogMarker.setLatLng([lat, lng]);
+    document.getElementById('cLat').textContent = lat.toFixed(6);
+    document.getElementById('cLon').textContent = lng.toFixed(6);
+    ok = true;
+  }
+
+  /* Activity */
+  const act = await aioGet('activity');
+  if (act) setActivity(act.value);
+
+  /* Battery */
+  const bat = await aioGet('battery');
+  if (bat && bat.value !== '') {
+    const pct = parseInt(bat.value);
+    document.getElementById('batPct').textContent = pct + '%';
+    const fill = document.getElementById('batFill');
+    fill.style.width = pct + '%';
+    fill.className   = 'bat-fill' + (pct < 15 ? ' low' : '');
+  }
+
+  /* Alert state */
+  const alt = await aioGet('alert');
+  if (alt) {
+    syncToggle('alert', 'altTog', alt.value);
+    const isAlert = alt.value === '1' || alt.value === 'ON';
+    document.getElementById('alertBanner').classList.toggle('show', isAlert);
+  }
+
+  /* Buzzer state */
+  const buz = await aioGet('buzzer');
+  if (buz) syncToggle('buzzer', 'buzTog', buz.value);
+
+  /* Geofence radius */
+  const geo = await aioGet('geofencing');
+  if (geo && parseFloat(geo.value) > 0) {
+    const r = parseFloat(geo.value);
+    geoRadius = r;
+    geoCircle.setRadius(r);
+    document.getElementById('geoSlider').value  = Math.min(1000, r);
+    document.getElementById('geoVal').textContent = r.toFixed(0) + ' m';
+  }
+
+  /* Geofence center from dashboard-set feeds */
+  const gLat = await aioGet('geofence-lat');
+  const gLon = await aioGet('geofence-lon');
+  if (gLat?.value && gLon?.value) {
+    const clat = parseFloat(gLat.value);
+    const clon = parseFloat(gLon.value);
+    if (!isNaN(clat) && !isNaN(clon)) {
+      geoCenter = [clat, clon];
+      geoCircle.setLatLng(geoCenter);
+      centerMark.setLatLng(geoCenter);
+      document.getElementById('geoInfo').textContent = `Centru: ${clat.toFixed(5)}, ${clon.toFixed(5)}`;
+    }
+  }
+
+  /* Barks */
+  await loadBarks();
+
+  /* Status */
+  document.getElementById('statusDot').className = 'dot' + (ok ? ' ok' : '');
+  document.getElementById('statusTxt').textContent = ok ? 'ONLINE' : 'OFFLINE';
+  document.getElementById('lastUpdate').textContent =
+    'Actualizat ' + new Date().toLocaleTimeString('ro-RO');
+  document.getElementById('refreshBtn').textContent = '↻ REFRESH';
+}
+
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

@@ -3,11 +3,8 @@
 
 SoftwareSerial sim808(SIM_RX, SIM_TX);
 
-#define USER_ADAFRUIT  "AndreiP25"
-#define CHEIE_ADAFRUIT "aio_KSXE208u6TMca4Ua16a849sKSZNp"
-
 // ============================================================
-// NIVEL 1 - Primitiva AT
+// NIVEL 1 – Primitiva AT
 // ============================================================
 
 bool sendSIM808Command(String cmd, unsigned long timeout) {
@@ -22,14 +19,14 @@ bool sendSIM808Command(String cmd, unsigned long timeout) {
             if (raspuns.indexOf("OK")    != -1) return true;
             if (raspuns.indexOf("ERROR") != -1) return false;
         }
-        yield();
+        yield(); webTick();
     }
-    Serial.println("[TIMEOUT] Comanda: " + cmd);
+    rlog("[TIMEOUT] Comanda: " + cmd);
     return false;
 }
 
 // ============================================================
-// NIVEL 2 - Nucleu HTTP (un POST și un GET generic)
+// NIVEL 2 – Nucleu HTTP
 // ============================================================
 
 static bool httpInit() {
@@ -60,7 +57,7 @@ static bool httpWaitForAction(int actionType) {
             if (response.indexOf(",4") != -1)
                 return false;
         }
-        yield();
+        yield(); webTick();
     }
     return false;
 }
@@ -89,7 +86,6 @@ String httpGet(const String& url) {
     httpSetCommonParams(url);
     sim808.println("AT+HTTPACTION=0");
 
-    // Asteapta confirmarea descarcarii
     unsigned long start = millis();
     String response = "";
     int dataLength = 0;
@@ -108,7 +104,7 @@ String httpGet(const String& url) {
             }
             if (response.indexOf("+HTTPACTION: 0,4") != -1) break;
         }
-        yield();
+        yield(); webTick();
     }
 
     String valoare = "";
@@ -119,25 +115,30 @@ String httpGet(const String& url) {
 
         while (millis() - readStart < 4000) {
             if (sim808.available()) jsonRaw += (char)sim808.read();
-            yield();
+            yield(); webTick();
         }
 
         // Parsare simpla fara librarie JSON
-        int idx = jsonRaw.indexOf("\"value\":\"");
+        // Adafruit poate returna "value":"x" sau "value": "x" (cu spatiu)
+        int idx = jsonRaw.indexOf("\"value\":");
         if (idx != -1) {
-            int start = idx + 9;
-            int end   = jsonRaw.indexOf("\"", start);
-            if (end != -1) valoare = jsonRaw.substring(start, end);
+            int cursor = idx + 8;
+            while (cursor < (int)jsonRaw.length() && (jsonRaw[cursor] == ' ' || jsonRaw[cursor] == '"'))
+                cursor++;
+            int end = jsonRaw.indexOf("\"", cursor);
+            if (end != -1) valoare = jsonRaw.substring(cursor, end);
+            valoare.trim();
         }
+        rlog("[HTTP RAW] " + jsonRaw.substring(0, min((int)jsonRaw.length(), 120)));
     }
 
     sendSIM808Command("AT+HTTPTERM");
-    Serial.println("[HTTP GET] Valoare: " + valoare);
+    rlog("[HTTP GET] " + url + " → " + valoare);
     return valoare;
 }
 
 // ============================================================
-// NIVEL 3 - API Adafruit (wrappers de business)
+// NIVEL 3 – API Adafruit
 // ============================================================
 
 static String adafruitUrl(const String& feedName, const String& suffix = "/data") {
@@ -145,18 +146,18 @@ static String adafruitUrl(const String& feedName, const String& suffix = "/data"
 }
 
 bool sendHTTPData(const String& feedName, const String& value) {
-    Serial.println("\n--- [HTTP] Trimitere pe feed: " + feedName + " ---");
+    rlog("\n--- [HTTP POST] feed: " + feedName + " = " + value + " ---");
     String payload = "{\"value\":\"" + value + "\"}";
     return httpPost(adafruitUrl(feedName), payload);
 }
 
 String getHTTPData(const String& feedName) {
-    Serial.println("\n--- [HTTP] Citire de pe feed: " + feedName + " ---");
+    rlog("\n--- [HTTP GET] feed: " + feedName + " ---");
     return httpGet(adafruitUrl(feedName, "/data/last"));
 }
 
 bool sendHTTPLocation(float lat, float lon, float ele) {
-    Serial.println("\n--- [HTTP] Trimitere locatie GPS ---");
+    rlog("\n--- [HTTP] Trimitere locatie GPS ---");
     String payload = "{\"value\":\"0\","
                      "\"lat\":"  + String(lat, 6) + ","
                      "\"lon\":"  + String(lon, 6) + ","
@@ -165,11 +166,11 @@ bool sendHTTPLocation(float lat, float lon, float ele) {
 }
 
 // ============================================================
-// NIVEL 4 - GPS
+// NIVEL 4 – GPS
 // ============================================================
 
 static float convertNMEAToDecimal(float raw) {
-    int degrees  = (int)(raw / 100);
+    int   degrees = (int)(raw / 100);
     float minutes = raw - (degrees * 100.0);
     return degrees + (minutes / 60.0);
 }
@@ -187,11 +188,11 @@ GPSLocation getLocation() {
             raspuns += c;
             if (raspuns.indexOf("OK") != -1) break;
         }
-        yield();
+        yield(); webTick();
     }
 
     int idxInf = raspuns.indexOf("+CGPSINF: 32,");
-    if (idxInf == -1) { Serial.println("[GPS] Format invalid."); return loc; }
+    if (idxInf == -1) { rlog("[GPS] Format invalid."); return loc; }
 
     String date = raspuns.substring(idxInf + 13);
     date.trim();
@@ -201,16 +202,16 @@ GPSLocation getLocation() {
     for (int i = 0; i < (int)date.length() && count < 15; i++)
         if (date[i] == ',') virgule[count++] = i;
 
-    if (count < 6) { Serial.println("[GPS] Date incomplete."); return loc; }
+    if (count < 6) { rlog("[GPS] Date incomplete."); return loc; }
 
     if (date.substring(virgule[0] + 1, virgule[1]) != "A") {
-        Serial.println("[GPS] No Fix.");
+        rlog("[GPS] No Fix.");
         return loc;
     }
 
     loc.fix = true;
     loc.latitude  = convertNMEAToDecimal(date.substring(virgule[1] + 1, virgule[2]).toFloat());
-    if (date.substring(virgule[2] + 1, virgule[3]) == "S") loc.latitude  = -loc.latitude;
+    if (date.substring(virgule[2] + 1, virgule[3]) == "S") loc.latitude = -loc.latitude;
 
     loc.longitude = convertNMEAToDecimal(date.substring(virgule[3] + 1, virgule[4]).toFloat());
     if (date.substring(virgule[4] + 1, virgule[5]) == "W") loc.longitude = -loc.longitude;
@@ -219,7 +220,6 @@ GPSLocation getLocation() {
     return loc;
 }
 
- 
 // ─── Baterie via AT+CBC ───────────────────────────────────────
 // Raspuns: +CBC: <bcs>,<bcl>,<voltage>
 //   bcs  : 0=nepornit, 1=incarcare, 2=plin
@@ -229,90 +229,238 @@ int getBatteryPercent() {
     sim808.println("AT+CBC");
     unsigned long start = millis();
     String raspuns = "";
- 
+
     while (millis() - start < 3000) {
         if (sim808.available()) {
             char c = sim808.read();
             raspuns += c;
             if (raspuns.indexOf("OK") != -1) break;
         }
-        yield();
+        yield(); webTick();
     }
- 
+
     // Cauta "+CBC: "
     int idx = raspuns.indexOf("+CBC:");
     if (idx == -1) {
-        Serial.println("[BAT] Raspuns invalid AT+CBC");
+        rlog("[BAT] Raspuns invalid AT+CBC");
         return -1;
     }
- 
+
     String data = raspuns.substring(idx + 5);
     data.trim();
- 
+
     // Format: "0,85,4100"
     int comma1 = data.indexOf(',');
     int comma2 = data.indexOf(',', comma1 + 1);
     if (comma1 == -1 || comma2 == -1) return -1;
- 
+
     // int bcs     = data.substring(0, comma1).toInt();  // status incarcare
     int bcl        = data.substring(comma1 + 1, comma2).toInt(); // procente
     int voltage_mv = data.substring(comma2 + 1).toInt();
- 
-    Serial.println("[BAT] " + String(bcl) + "% (" + String(voltage_mv) + " mV)");
+
+    rlog("[BAT] " + String(bcl) + "% (" + String(voltage_mv) + " mV)");
     return bcl;
 }
 
-
 // ============================================================
-// NIVEL 5 - Comenzi de nivel inalt
+// NIVEL 5 – Comenzi de nivel inalt
 // ============================================================
 
-void setupSIM() {
+// Asteapta un mesaj specific de la SIM808, logeaza TOT ce vine
+// ca sa putem vedea exact ce trimite modulul
+static bool waitForUnsolicited(const String& token, unsigned long timeout = 20000) {
+    unsigned long start = millis();
+    String buf = "";
+    String lineBuf = "";
+
+    rlog("[SIM] Astept '" + token + "' (max " + String(timeout/1000) + "s)...");
+
+    while (millis() - start < timeout) {
+        if (sim808.available()) {
+            char c = sim808.read();
+            buf     += c;
+            lineBuf += c;
+
+            // Logeaza linie cu linie in web log
+            if (c == '\n') {
+                String trimmed = lineBuf;
+                trimmed.trim();
+                if (trimmed.length() > 0) rlog("[SIM<<] " + trimmed);
+                lineBuf = "";
+            }
+
+            if (buf.indexOf("OVER-VOLTAGE POWER DOWN") != -1) {
+                rlog("[EROARE CRITICA] OVER-VOLTAGE POWER DOWN!");
+                rlog("[HINT] BAT+ e conectat la 5V? Trebuie OUT+ TP4056 (3.7-4.2V)!");
+                return false;
+            }
+            if (buf.indexOf("UNDER-VOLTAGE POWER DOWN") != -1) {
+                rlog("[EROARE] UNDER-VOLTAGE POWER DOWN!");
+                rlog("[HINT] Bateria e prea descarcata sau nu da curent suficient (SIM808 cere ~2A).");
+                return false;
+            }
+            if (buf.indexOf("UNDER-VOLTAGE WARNING") != -1) {
+                rlog("[WARN] Under-voltage warning – tensiune scazuta, posibil instabil.");
+            }
+            if (buf.indexOf(token) != -1) {
+                rlog("[SIM] Gasit '" + token + "' dupa " + String(millis()-start) + " ms");
+                return true;
+            }
+            if (buf.length() > 256) buf = buf.substring(buf.length() - 256);
+        }
+        yield(); webTick();
+    }
+
+    // Timeout – logam ce am primit ca sa stim ce a trimis modulul
+    String last = buf; last.trim();
+    rlog("[SIM] Timeout " + String(timeout/1000) + "s – '" + token + "' nu a venit.");
+    if (last.length() > 0)
+        rlog("[SIM] Ultimele date: '" + last + "'");
+    else
+        rlog("[SIM] Nimic primit de la modul – verifica conexiunea RX/TX si alimentarea.");
+    return false;
+}
+
+// Returneaza true daca init-ul a reusit complet
+bool setupSIM() {
+    // ── Exact pattern-ul original care functiona ──────────────
+    // Ordinea conteaza: puls INAINTE de sim808.begin()
     pinMode(SIM_PWR, OUTPUT);
     digitalWrite(SIM_PWR, HIGH); delay(1500);
     digitalWrite(SIM_PWR, LOW);
 
     sim808.begin(9600);
-    delay(3000);
+    delay(3000);   // da timp modulului sa booteze si sa trimita RDY
 
-    Serial.println("\n--- Sincronizare Autobauding ---");
-    while (!sendSIM808Command("AT", 2000)) delay(500);
-
-    Serial.println("\n--- Pornire GPS ---");
-    sendSIM808Command("AT+CGPSPWR=1");
-
-    Serial.println("\n--- Configurare GPRS ---");
-    sendSIM808Command("AT+SAPBR=0,1", 2000); delay(500);
-    sendSIM808Command("AT+SAPBR=3,1,\"Contype\",\"GPRS\"");
-    sendSIM808Command("AT+SAPBR=3,1,\"APN\",\"net\"");
-    delay(500);
-
-    if (sendSIM808Command("AT+SAPBR=1,1", 10000)) {
-        Serial.println("\n[SUCCESS] GPRS activ!");
-        sendSIM808Command("AT+SAPBR=2,1", 2000);
-    } else {
-        Serial.println("\n[FAIL] Nu s-a putut activa GPRS.");
+    // Citim tot ce a venit in timpul delay-ului (RDY, +CFUN, +CPIN)
+    // si logam ca sa vedem starea modulului
+    rlog("\n--- Sincronizare AT ---");
+    String bootMsg = "";
+    unsigned long drainStart = millis();
+    while (millis() - drainStart < 500) {
+        if (sim808.available()) {
+            char c = sim808.read();
+            bootMsg += c;
+        }
+        yield(); webTick();
     }
+    if (bootMsg.length() > 0) {
+        bootMsg.trim();
+        rlog("[SIM<<] " + bootMsg);
+        if (bootMsg.indexOf("OVER-VOLTAGE") != -1) {
+            rlog("[EROARE] OVER-VOLTAGE! BAT+ conectat la 5V? Trebuie OUT+ TP4056.");
+            return false;
+        }
+        if (bootMsg.indexOf("UNDER-VOLTAGE") != -1) {
+            rlog("[EROARE] UNDER-VOLTAGE! Bateria prea slaba sau curent insuficient.");
+            return false;
+        }
+    }
+
+    // Poll AT pana raspunde – exact ca in original
+    int retries = 0;
+    while (!sendSIM808Command("AT", 2000)) {
+        if (++retries > 20) {
+            rlog("[SIM] Nu raspunde la AT dupa 20 incercari. Abort.");
+            return false;
+        }
+        rlog("[SIM] Retry AT " + String(retries) + "/20...");
+        delay(500); webTick();
+    }
+    rlog("[SIM] AT OK!");
+    sendSIM808Command("ATE0");   // echo off
+
+    // GPS
+    rlog("\n--- Pornire GPS ---");
+    if (sendSIM808Command("AT+CGPSPWR=1"))
+        rlog("[GPS] Pornit.");
+    else
+        rlog("[GPS] Eroare pornire – continuam oricum.");
+
+    // ── Asteapta inregistrare GSM (max 30s) ──────────────────
+    rlog("\n--- Verificare semnal GSM ---");
+    bool registered = false;
+    for (int i = 0; i < 15; i++) {
+        sim808.println("AT+CREG?");
+        unsigned long t = millis();
+        String r = "";
+        while (millis() - t < 2000) {
+            if (sim808.available()) r += (char)sim808.read();
+            yield(); webTick();
+        }
+        r.trim();
+        rlog("[GSM] CREG: " + r);
+        // 0,1 = inregistrat local  |  0,5 = roaming
+        if (r.indexOf(",1") != -1 || r.indexOf(",5") != -1) {
+            registered = true;
+            rlog("[GSM] Inregistrat in retea dupa " + String(i * 2) + "s.");
+            break;
+        }
+        delay(500); webTick();
+    }
+    if (!registered) {
+        rlog("[FAIL] Nu e inregistrat in retea GSM.");
+        rlog("[HINT] SIM valid? Are semnal? PIN dezactivat?");
+        return false;
+    }
+
+    // ── Configurare GPRS ─────────────────────────────────────
+    rlog("\n--- Configurare GPRS ---");
+
+    // Inchide bearer-ul daca era deschis, ignora eroarea
+    sendSIM808Command("AT+SAPBR=0,1", 5000);
+    delay(1000);
+
+    bool gprsOk = false;
+    for (int attempt = 1; attempt <= 3 && !gprsOk; attempt++) {
+        rlog("[GPRS] Tentativa " + String(attempt) + "/3...");
+
+        if (!sendSIM808Command("AT+SAPBR=3,1,\"Contype\",\"GPRS\""))
+            rlog("[GPRS] WARN: Contype failed");
+        if (!sendSIM808Command("AT+SAPBR=3,1,\"APN\",\"net\""))
+            rlog("[GPRS] WARN: APN failed");
+
+        delay(500);
+
+        rlog("[GPRS] Deschid bearer (AT+SAPBR=1,1, max 30s)...");
+        if (sendSIM808Command("AT+SAPBR=1,1", 30000)) {
+            gprsOk = true;
+        } else {
+            rlog("[GPRS] Tentativa " + String(attempt) + " esuata, astept 3s...");
+            sendSIM808Command("AT+SAPBR=0,1", 5000);
+            delay(3000);
+        }
+    }
+
+    if (!gprsOk) {
+        rlog("[FAIL] GPRS esuat dupa 3 tentative. Verifica SIM si APN.");
+        return false;
+    }
+
+    rlog("[SUCCESS] GPRS activ!");
+    sendSIM808Command("AT+SAPBR=2,1", 2000);   // log IP alocat
+    rlog("[GPRS] Stabilizare 2s...");
+    delay(2000);
+    return true;
 }
 
 void updateSIM(SystemState& state) {
     while (sim808.available()) Serial.write(sim808.read());
 }
 
-void sendBark(int intensity) { 
-    sendHTTPData("barking", String(intensity)); 
+void sendBark(int intensity) {
+    sendHTTPData("barking", String(intensity));
 }
 
 void sendGPS(GPSLocation loc) {
     if (!loc.fix) {
-        Serial.println("[GPS] No Fix - nu trimitem.");
+        rlog("[GPS] No Fix - nu trimitem.");
         return;
     }
-
-    if(sendHTTPLocation(loc.latitude, loc.longitude, 0.0)) {
-        Serial.println("[GPS] Pozitie trimisa!");
+    if (sendHTTPLocation(loc.latitude, loc.longitude, 0.0)) {
+        rlog("[GPS] Pozitie trimisa!");
     } else {
-        Serial.println("[GPS] Eroare trimitere.");
+        rlog("[GPS] Eroare trimitere.");
     }
 }
 
@@ -320,19 +468,19 @@ void sendGPS(GPSLocation loc) {
 // Functioneaza chiar daca GPRS / Adafruit e down
 // SIM808 trebuie sa aiba semnal GSM (nu neaparat date)
 bool sendSMS(const String& number, const String& message) {
-    Serial.println("\n--- [SMS] Trimitere catre " + number + " ---");
-    Serial.println("[SMS] Mesaj: " + message);
- 
+    rlog("\n--- [SMS] Trimitere catre " + number + " ---");
+    rlog("[SMS] Mesaj: " + message);
+
     // Mod text (nu PDU)
     if (!sendSIM808Command("AT+CMGF=1")) {
-        Serial.println("[SMS] Eroare CMGF");
+        rlog("[SMS] Eroare CMGF");
         return false;
     }
- 
+
     // Destinatar
     sim808.println("AT+CMGS=\"" + number + "\"");
     delay(1000);
- 
+
     // Asteaptam promptul '>'
     unsigned long start = millis();
     String prompt = "";
@@ -342,19 +490,19 @@ bool sendSMS(const String& number, const String& message) {
             prompt += c;
             if (prompt.indexOf('>') != -1) break;
         }
-        yield();
+        yield(); webTick();
     }
- 
+
     if (prompt.indexOf('>') == -1) {
-        Serial.println("[SMS] Prompt '>' negasit");
+        rlog("[SMS] Prompt '>' negasit");
         return false;
     }
- 
+
     // Trimitem mesajul + Ctrl+Z (char 26) pentru a confirma
     sim808.print(message);
     delay(500);
     sim808.write(26);   // Ctrl+Z = send
- 
+
     // Asteptam confirmare +CMGS sau ERROR
     start = millis();
     String raspuns = "";
@@ -364,17 +512,17 @@ bool sendSMS(const String& number, const String& message) {
             raspuns += c;
             Serial.write(c);
             if (raspuns.indexOf("+CMGS:") != -1) {
-                Serial.println("\n[SMS] Trimis cu succes!");
+                rlog("\n[SMS] Trimis cu succes!");
                 return true;
             }
             if (raspuns.indexOf("ERROR") != -1) {
-                Serial.println("\n[SMS] Eroare la trimitere");
+                rlog("\n[SMS] Eroare la trimitere");
                 return false;
             }
         }
-        yield();
+        yield(); webTick();
     }
- 
-    Serial.println("[SMS] Timeout");
+
+    rlog("[SMS] Timeout");
     return false;
 }
