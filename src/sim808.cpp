@@ -10,7 +10,7 @@ SoftwareSerial sim808(SIM_RX, SIM_TX);
 // NIVEL 1 - Primitiva AT
 // ============================================================
 
-bool sendSIM808Command(String cmd, unsigned long timeout = 3000) {
+bool sendSIM808Command(String cmd, unsigned long timeout) {
     sim808.println(cmd);
     unsigned long start = millis();
     String raspuns = "";
@@ -219,6 +219,50 @@ GPSLocation getLocation() {
     return loc;
 }
 
+ 
+// ─── Baterie via AT+CBC ───────────────────────────────────────
+// Raspuns: +CBC: <bcs>,<bcl>,<voltage>
+//   bcs  : 0=nepornit, 1=incarcare, 2=plin
+//   bcl  : 0-100 (procente)
+//   voltage: mV
+int getBatteryPercent() {
+    sim808.println("AT+CBC");
+    unsigned long start = millis();
+    String raspuns = "";
+ 
+    while (millis() - start < 3000) {
+        if (sim808.available()) {
+            char c = sim808.read();
+            raspuns += c;
+            if (raspuns.indexOf("OK") != -1) break;
+        }
+        yield();
+    }
+ 
+    // Cauta "+CBC: "
+    int idx = raspuns.indexOf("+CBC:");
+    if (idx == -1) {
+        Serial.println("[BAT] Raspuns invalid AT+CBC");
+        return -1;
+    }
+ 
+    String data = raspuns.substring(idx + 5);
+    data.trim();
+ 
+    // Format: "0,85,4100"
+    int comma1 = data.indexOf(',');
+    int comma2 = data.indexOf(',', comma1 + 1);
+    if (comma1 == -1 || comma2 == -1) return -1;
+ 
+    // int bcs     = data.substring(0, comma1).toInt();  // status incarcare
+    int bcl        = data.substring(comma1 + 1, comma2).toInt(); // procente
+    int voltage_mv = data.substring(comma2 + 1).toInt();
+ 
+    Serial.println("[BAT] " + String(bcl) + "% (" + String(voltage_mv) + " mV)");
+    return bcl;
+}
+
+
 // ============================================================
 // NIVEL 5 - Comenzi de nivel inalt
 // ============================================================
@@ -270,4 +314,67 @@ void sendGPS(GPSLocation loc) {
     } else {
         Serial.println("[GPS] Eroare trimitere.");
     }
+}
+
+// ─── SMS via GSM ─────────────────────────────────────────────
+// Functioneaza chiar daca GPRS / Adafruit e down
+// SIM808 trebuie sa aiba semnal GSM (nu neaparat date)
+bool sendSMS(const String& number, const String& message) {
+    Serial.println("\n--- [SMS] Trimitere catre " + number + " ---");
+    Serial.println("[SMS] Mesaj: " + message);
+ 
+    // Mod text (nu PDU)
+    if (!sendSIM808Command("AT+CMGF=1")) {
+        Serial.println("[SMS] Eroare CMGF");
+        return false;
+    }
+ 
+    // Destinatar
+    sim808.println("AT+CMGS=\"" + number + "\"");
+    delay(1000);
+ 
+    // Asteaptam promptul '>'
+    unsigned long start = millis();
+    String prompt = "";
+    while (millis() - start < 3000) {
+        if (sim808.available()) {
+            char c = sim808.read();
+            prompt += c;
+            if (prompt.indexOf('>') != -1) break;
+        }
+        yield();
+    }
+ 
+    if (prompt.indexOf('>') == -1) {
+        Serial.println("[SMS] Prompt '>' negasit");
+        return false;
+    }
+ 
+    // Trimitem mesajul + Ctrl+Z (char 26) pentru a confirma
+    sim808.print(message);
+    delay(500);
+    sim808.write(26);   // Ctrl+Z = send
+ 
+    // Asteptam confirmare +CMGS sau ERROR
+    start = millis();
+    String raspuns = "";
+    while (millis() - start < 10000) {
+        if (sim808.available()) {
+            char c = sim808.read();
+            raspuns += c;
+            Serial.write(c);
+            if (raspuns.indexOf("+CMGS:") != -1) {
+                Serial.println("\n[SMS] Trimis cu succes!");
+                return true;
+            }
+            if (raspuns.indexOf("ERROR") != -1) {
+                Serial.println("\n[SMS] Eroare la trimitere");
+                return false;
+            }
+        }
+        yield();
+    }
+ 
+    Serial.println("[SMS] Timeout");
+    return false;
 }
