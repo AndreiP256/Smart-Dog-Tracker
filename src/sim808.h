@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <utility>
 
-#define CHEIE_ADAFRUIT "aio_KSXE208u6TMca4Ua16a849sKSZNp"
+#define CHEIE_ADAFRUIT "cheie"
 #define USER_ADAFRUIT  "AndreiP25"
 
 #define SIM_RX D4
@@ -68,5 +68,6 @@ extern void webTick();
 
 // Log care apare atat in Serial cat si in web log (192.168.4.1)
 extern void rlog(const String& msg);
+extern void updateBarking();
 
 #endif

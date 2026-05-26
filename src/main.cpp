@@ -17,7 +17,7 @@
 #define INTERVAL_BARK_SAMPLE    100UL
 
 // ─── Barking ──────────────────────────────────────────────────
-#define BARK_THRESHOLD   350
+#define BARK_THRESHOLD   90
 #define BARK_CONFIRM_MS  400
 
 // ─── LED blink speeds ─────────────────────────────────────────
@@ -259,23 +259,38 @@ bool isInsideGeofence(const GPSLocation& loc) {
 int  barkPeak   = 0;
 bool barkActive = false;
 unsigned long barkStart = 0;
+int pendingBarkIntensity = 0; 
+
+bool isBarkingState = false; // Flag intern ca să nu numărăm eșantioane consecutive din același lătrat
+int pendingBarkCount = 0;
 
 void updateBarking() {
+    if (state.forceBuzzer || state.alert ){
+        return;
+    }
     unsigned long now = millis();
     if (now - tBarkSample < INTERVAL_BARK_SAMPLE) return;
     tBarkSample = now;
+    
     int amplitude = abs(analogRead(MIC) - 512);
+
+
     if (amplitude > BARK_THRESHOLD) {
-        if (!barkActive) { barkActive = true; barkStart = now; barkPeak = amplitude; }
-        else {
-            if (amplitude > barkPeak) barkPeak = amplitude;
-            if (now - barkStart >= BARK_CONFIRM_MS) {
-                rlog("[BARK] Detectat! Intensitate: " + String(barkPeak));
-                sendBark(barkPeak);
-                barkActive = false; barkPeak = 0;
-            }
+        // Dacă e un lătrat nou (venit după o perioadă de liniște)
+        if (!isBarkingState) {
+            pendingBarkCount++; // Incrementăm numărul total de lătraturi
+            isBarkingState = true;
+            rlog("[BARK] Lătrat nou detectat! Număr total acumulat: " + String(pendingBarkCount));
         }
-    } else { barkActive = false; }
+        
+        // Păstrăm cea mai mare intensitate din această sesiune
+        if (amplitude > pendingBarkIntensity) {
+            pendingBarkIntensity = amplitude; 
+        }
+    } else {
+        // Când intensitatea scade sub prag, înseamnă că lătratul s-a terminat
+        isBarkingState = false; 
+    }
 }
 
 // ─── Poll comenzi Adafruit ────────────────────────────────────
@@ -443,6 +458,21 @@ void loop() {
     updateBarking();
 
     if (!gsmReady) return;
+
+    // Trimitem datele de lătrat doar când loop-ul e liber și avem ceva acumulat
+    if (pendingBarkCount > 0) {
+        // Construiești un string formatat frumos
+        String barkPayload = String(pendingBarkCount) + " latraturi (Max: " + String(pendingBarkIntensity) + ")";
+        
+        rlog("[GSM] Se trimit datele de lătrat consolidat: " + barkPayload);
+        
+        // Trimitem string-ul către feed-ul de barking
+        if (sendHTTPData("barking", barkPayload)) {
+            // Resetăm ambele buffere DOAR dacă trimiterea a reușit
+            pendingBarkCount = 0;
+            pendingBarkIntensity = 0;
+        }
+    }
 
     unsigned long now = millis();
     if (now - tCitire >= INTERVAL_CITIRE) {

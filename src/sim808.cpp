@@ -19,7 +19,7 @@ bool sendSIM808Command(String cmd, unsigned long timeout) {
             if (raspuns.indexOf("OK")    != -1) return true;
             if (raspuns.indexOf("ERROR") != -1) return false;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
     rlog("[TIMEOUT] Comanda: " + cmd);
     return false;
@@ -57,7 +57,7 @@ static bool httpWaitForAction(int actionType) {
             if (response.indexOf(",4") != -1)
                 return false;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
     return false;
 }
@@ -104,7 +104,7 @@ String httpGet(const String& url) {
             }
             if (response.indexOf("+HTTPACTION: 0,4") != -1) break;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
 
     String valoare = "";
@@ -115,7 +115,7 @@ String httpGet(const String& url) {
 
         while (millis() - readStart < 4000) {
             if (sim808.available()) jsonRaw += (char)sim808.read();
-            yield(); webTick();
+            yield(); webTick(); updateBarking();
         }
 
         // Parsare simpla fara librarie JSON
@@ -188,7 +188,7 @@ GPSLocation getLocation() {
             raspuns += c;
             if (raspuns.indexOf("OK") != -1) break;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
 
     int idxInf = raspuns.indexOf("+CGPSINF: 32,");
@@ -236,7 +236,7 @@ int getBatteryPercent() {
             raspuns += c;
             if (raspuns.indexOf("OK") != -1) break;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
 
     // Cauta "+CBC: "
@@ -308,7 +308,7 @@ static bool waitForUnsolicited(const String& token, unsigned long timeout = 2000
             }
             if (buf.length() > 256) buf = buf.substring(buf.length() - 256);
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
 
     // Timeout – logam ce am primit ca sa stim ce a trimis modulul
@@ -342,7 +342,7 @@ bool setupSIM() {
             char c = sim808.read();
             bootMsg += c;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
     if (bootMsg.length() > 0) {
         bootMsg.trim();
@@ -386,7 +386,7 @@ bool setupSIM() {
         String r = "";
         while (millis() - t < 2000) {
             if (sim808.available()) r += (char)sim808.read();
-            yield(); webTick();
+            yield(); webTick(); updateBarking();
         }
         r.trim();
         rlog("[GSM] CREG: " + r);
@@ -490,7 +490,7 @@ bool sendSMS(const String& number, const String& message) {
             prompt += c;
             if (prompt.indexOf('>') != -1) break;
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
 
     if (prompt.indexOf('>') == -1) {
@@ -520,7 +520,7 @@ bool sendSMS(const String& number, const String& message) {
                 return false;
             }
         }
-        yield(); webTick();
+        yield(); webTick(); updateBarking();
     }
 
     rlog("[SMS] Timeout");
